@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 
-const DOT_COUNT = 24; // index 0 = fixed anchor, index (DOT_COUNT - 1) = knob
-const SEGMENT = 6.5; // px, resting spacing between dots
-const MAX_REACH = 70; // px, max distance the knob can travel from rest, any direction
-const SIDE_AMPLIFY = 2.5; // sideways swinging takes little force; only the downward "stretch" resists
-const SAG_FACTOR = 0.35; // how much the string bows out when pulled sideways
-const KNOB_STIFFNESS = 0.2; // the knob is the only real mass/spring in the system
-const KNOB_DAMPING = 0.86; // underdamped on purpose — it should swing past rest before settling
+const DOT_COUNT = 24;
+const SEGMENT = 6.5;
+const MAX_REACH = 70;
+const SIDE_AMPLIFY = 2.5;
+const SAG_FACTOR = 0.35;
+const KNOB_STIFFNESS = 0.1;
+const KNOB_DAMPING = 0.93;
+const CONTROL_STIFFNESS = 0.4;
+const CONTROL_DAMPING = 0.72;
+const CONTROL_SETTLE_RATE = 0.5;
 
 const REST_LENGTH = (DOT_COUNT - 1) * SEGMENT;
 const SVG_WIDTH = 2 * MAX_REACH + 20;
@@ -24,6 +27,12 @@ export function PullCord() {
   const dotRefs = useRef<(SVGCircleElement | null)[]>([]);
   const polylineRef = useRef<SVGPolylineElement | null>(null);
   const knobRef = useRef({ x: ANCHOR_X, y: ANCHOR_Y + REST_LENGTH, vx: 0, vy: 0 });
+  const controlRef = useRef({
+    x: ANCHOR_X,
+    y: ANCHOR_Y + REST_LENGTH / 2,
+    vx: 0,
+    vy: 0,
+  });
 
   const draggingRef = useRef(false);
   const dragRef = useRef({ x: 0, y: 0 });
@@ -37,15 +46,11 @@ export function PullCord() {
       const knob = knobRef.current;
 
       if (draggingRef.current) {
-        // Held taut: the knob is exactly where the pointer is, no lag at all — a real
-        // string in your hand doesn't drift toward that position over several frames.
         knob.x = ANCHOR_X + dragRef.current.x;
         knob.y = ANCHOR_Y + REST_LENGTH + dragRef.current.y;
         knob.vx = 0;
         knob.vy = 0;
       } else {
-        // Let go: only now does the knob behave like a weight on a string, swinging
-        // back toward rest and overshooting before it settles.
         const restX = ANCHOR_X;
         const restY = ANCHOR_Y + REST_LENGTH;
         knob.vx = (knob.vx + (restX - knob.x) * KNOB_STIFFNESS) * KNOB_DAMPING;
@@ -54,21 +59,30 @@ export function PullCord() {
         knob.y += knob.vy;
       }
 
-      // The rest of the string is a curve from the fixed anchor to wherever the knob
-      // currently is — this always connects exactly, no chain-length mismatch possible.
-      // It bows out sideways (real slack/gravity look) but stays straight when pulled
-      // straight down.
       const sideways = knob.x - ANCHOR_X;
-      const controlX = (ANCHOR_X + knob.x) / 2;
-      const controlY = (ANCHOR_Y + knob.y) / 2 + Math.abs(sideways) * SAG_FACTOR;
+      const idealControlX = (ANCHOR_X + knob.x) / 2;
+      const idealControlY = (ANCHOR_Y + knob.y) / 2 + Math.abs(sideways) * SAG_FACTOR;
+
+      const control = controlRef.current;
+      if (draggingRef.current) {
+        control.vx = (control.vx + (idealControlX - control.x) * CONTROL_STIFFNESS) * CONTROL_DAMPING;
+        control.vy = (control.vy + (idealControlY - control.y) * CONTROL_STIFFNESS) * CONTROL_DAMPING;
+        control.x += control.vx;
+        control.y += control.vy;
+      } else {
+        control.vx = 0;
+        control.vy = 0;
+        control.x += (idealControlX - control.x) * CONTROL_SETTLE_RATE;
+        control.y += (idealControlY - control.y) * CONTROL_SETTLE_RATE;
+      }
 
       const points: { x: number; y: number }[] = [];
       for (let i = 0; i < DOT_COUNT; i++) {
         const t = i / (DOT_COUNT - 1);
         const mt = 1 - t;
         points.push({
-          x: mt * mt * ANCHOR_X + 2 * mt * t * controlX + t * t * knob.x,
-          y: mt * mt * ANCHOR_Y + 2 * mt * t * controlY + t * t * knob.y,
+          x: mt * mt * ANCHOR_X + 2 * mt * t * control.x + t * t * knob.x,
+          y: mt * mt * ANCHOR_Y + 2 * mt * t * control.y + t * t * knob.y,
         });
       }
 
@@ -140,17 +154,10 @@ export function PullCord() {
       onPointerCancel={handlePointerCancel}
       onClick={handleClick}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      className={`absolute right-8 top-[-28px] touch-none ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
+      className={`fixed right-8 top-[-28px] z-30 touch-none ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
       style={{ width: SVG_WIDTH, height: SVG_HEIGHT }}
     >
       <svg width={SVG_WIDTH} height={SVG_HEIGHT} aria-hidden="true" className="overflow-visible">
-        <polyline
-          ref={polylineRef}
-          fill="none"
-          stroke="var(--foreground)"
-          strokeOpacity={0.45}
-          strokeWidth={1.25}
-        />
         {Array.from({ length: DOT_COUNT }, (_, i) => i * SEGMENT + ANCHOR_Y).map((y, i) => (
           <circle
             key={i}
@@ -159,11 +166,18 @@ export function PullCord() {
             }}
             cx={ANCHOR_X}
             cy={y}
-            r={i === DOT_COUNT - 1 ? 10 : 2.25}
+            r={i === DOT_COUNT - 1 ? 13 : 2.25}
             fill={i === DOT_COUNT - 1 ? "var(--accent)" : "var(--foreground)"}
             fillOpacity={i === DOT_COUNT - 1 ? 1 : 0.55}
           />
         ))}
+        <polyline
+          ref={polylineRef}
+          fill="none"
+          stroke="var(--foreground)"
+          strokeOpacity={0.45}
+          strokeWidth={1.25}
+        />
       </svg>
     </button>
   );

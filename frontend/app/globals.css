@@ -16,10 +16,9 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-accent: var(--accent);
-  --font-display: "Syncopate", sans-serif;
-  --font-heading: "BBH Bartle", sans-serif;
-  --font-body: "Fustat", sans-serif;
-  --font-subtitle: "Scope One", serif;
+  --font-display: var(--font-syncopate), sans-serif;
+  --font-heading: var(--font-bbh-bartle), sans-serif;
+  --font-body: var(--font-scope-one), serif;
   --font-sans: var(--font-body);
 }
 
@@ -29,6 +28,10 @@
   ::after {
     transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
   }
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
